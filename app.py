@@ -86,7 +86,10 @@ def create_blend_preview(source: Path, preview_name: str | None = None) -> bool:
         "result = bpy.ops.wm.open_mainfile(filepath=source_path)\n"
         "if 'FINISHED' not in result or os.path.normcase(os.path.abspath(bpy.data.filepath)) != os.path.normcase(source_path):\n"
         "    raise RuntimeError('O arquivo Blender não foi aberto completamente.')\n"
-        "bpy.ops.file.pack_all()\n"
+        "try:\n"
+        "    bpy.ops.file.pack_all()\n"
+        "except RuntimeError as error:\n"
+        "    print(f'IMAGE_PACK_WARNING: {error}', file=sys.stderr)\n"
         "bpy.ops.export_scene.gltf(filepath=export_path, export_format='GLB')\n"
     )
     command = [
@@ -105,6 +108,18 @@ def create_blend_preview(source: Path, preview_name: str | None = None) -> bool:
             details = (result.stderr + result.stdout)[-2000:]
             logger.error("Falha ao exportar prévia de %s: %s", source.name, details)
             return False
+
+        pack_warnings = [
+            line.split("IMAGE_PACK_WARNING:", 1)[1].strip()
+            for line in (result.stderr + result.stdout).splitlines()
+            if "IMAGE_PACK_WARNING:" in line
+        ]
+        if pack_warnings:
+            logger.warning(
+                "Algumas imagens externas de %s não puderam ser empacotadas: %s",
+                source.name,
+                pack_warnings[0],
+            )
 
         validate_model_file(temporary_path, ".glb")
         os.replace(temporary_path, preview_path)
@@ -246,7 +261,7 @@ def download_github_file(
         if extension.startswith(".blend") and not create_blend_preview(temporary_path, filename):
             raise HTTPException(
                 status_code=422,
-                detail="O Blender não conseguiu abrir este arquivo completo. Envie o projeto .blend original, não apenas o cabeçalho.",
+                detail="O Blender não conseguiu gerar a prévia. Confira se o projeto e as texturas externas estão acessíveis; no Blender, use File > External Data > Pack Resources antes de enviar.",
             )
         destination = MODELS_DIR / filename
         os.replace(temporary_path, destination)
@@ -474,7 +489,7 @@ async def upload_model(file: UploadFile = File(...)) -> dict[str, str | bool]:
             if not previewable:
                 raise HTTPException(
                     status_code=422,
-                    detail="O Blender não conseguiu abrir este arquivo completo. Envie o projeto .blend original, não apenas o cabeçalho.",
+                    detail="O Blender não conseguiu gerar a prévia. Confira se o projeto e as texturas externas estão acessíveis; no Blender, use File > External Data > Pack Resources antes de enviar.",
                 )
         os.replace(temporary_path, destination)
         detach_github_source(filename)
