@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: modelagem-antunes
+    runtime: docker
+    plan: free
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    healthCheckPath: /api/models
+    envVars:
+      - key: MODEL_STORAGE_DIR
+        value: /var/data
+      - key: BLENDER_EXECUTABLE
+        value: /opt/blender/blender
