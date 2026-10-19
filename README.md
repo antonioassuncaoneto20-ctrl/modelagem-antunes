@@ -27,7 +27,7 @@ Cada painel tem seleção e câmera próprias. Escolha um arquivo no menu e cliq
 
 ## Publicar com HTTPS
 
-O GitHub guarda o código; o Render executa o Docker, Python e Blender. O código está no repositório `Salasto21/modelagem-antunes`. No Render, escolha **New > Blueprint** e conecte esse repositório. O Blueprint usa o plano gratuito e publica o serviço em uma URL `https://modelagem-antunes.onrender.com` (se o nome estiver disponível), com novos deploys após atualizações no GitHub.
+O GitHub guarda o código; o Render executa o Docker, Python e Blender. O código está no repositório `antonioassuncaoneto20-ctrl/modelagem-antunes`. No Render, escolha **New > Blueprint** e conecte esse repositório. O Blueprint usa o plano gratuito e publica o serviço em uma URL `https://modelagem-antunes.onrender.com` (se o nome estiver disponível), com novos deploys após atualizações no GitHub.
 
 No plano gratuito, o serviço pode dormir após 15 minutos sem tráfego e levar cerca de um minuto para voltar. O armazenamento é temporário: modelos enviados e arquivos importados do GitHub podem desaparecer quando o serviço dormir, reiniciar ou receber um novo deploy. Para usá-los novamente, importe os modelos do GitHub ou envie-os de novo. Os limites mensais gratuitos do Render também se aplicam. O `.dockerignore` exclui `models/` e `data/`.
 
