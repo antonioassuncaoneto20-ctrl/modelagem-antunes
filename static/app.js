@@ -20,7 +20,7 @@ async function loadAccount() {
     }
     const user = await response.json();
     const accountButton = document.querySelector("#account-button");
-    accountButton.textContent = `${user.name} Â· Sair`;
+    accountButton.textContent = `${user.name} · Sair`;
   } catch (error) {
     console.error("Falha ao consultar a conta:", error);
   }
@@ -35,8 +35,8 @@ accountButton.addEventListener("click", async () => {
     window.location.replace("/");
   } catch (error) {
     accountButton.disabled = false;
-    showToast("NÃ£o foi possÃ­vel sair da conta. Tente novamente.");
-    console.error("Falha ao encerrar a sessÃ£o:", error);
+    showToast("Não foi possível sair da conta. Tente novamente.");
+    console.error("Falha ao encerrar a sessão:", error);
   }
 });
 
@@ -60,7 +60,7 @@ function createSlot(element, index) {
   wireframeToggle.disabled = true;
   const polygonCount = document.createElement("span");
   polygonCount.className = "polygon-count";
-  polygonCount.textContent = "0 polÃ­gonos";
+  polygonCount.textContent = "0 polígonos";
   tools.append(textureToggle, wireframeToggle, polygonCount);
   const camera = new THREE.PerspectiveCamera(38, 1, 0.01, 1000);
   const scene = new THREE.Scene();
@@ -143,7 +143,7 @@ function createSlot(element, index) {
     } else if (model.previewable) {
       loadModel(slot, model);
     } else {
-      showToast("A prÃ©via deste arquivo ainda nÃ£o estÃ¡ disponÃ­vel.");
+      showToast("A prévia deste arquivo ainda não está disponível.");
     }
   });
   slot.fullscreenButton.addEventListener("click", async () => {
@@ -151,7 +151,7 @@ function createSlot(element, index) {
       if (document.fullscreenElement === element) await document.exitFullscreen();
       else await element.requestFullscreen();
     } catch (error) {
-      showToast("NÃ£o foi possÃ­vel abrir este painel em tela cheia.");
+      showToast("Não foi possível abrir este painel em tela cheia.");
       console.error("Falha ao alternar tela cheia:", error);
     }
   });
@@ -289,7 +289,7 @@ function resetModelTools(slot) {
   slot.wireframeVisible = false;
   slot.textureToggle.disabled = true;
   slot.wireframeToggle.disabled = true;
-  slot.polygonCount.textContent = "0 polÃ­gonos";
+  slot.polygonCount.textContent = "0 polígonos";
   updateTextureToggle(slot);
   setWireframeVisibility(slot, false);
 }
@@ -391,7 +391,7 @@ async function loadModel(slot, model) {
     slot.wireframeToggle.disabled = slot.modelMeshes.length === 0;
     updateTextureToggle(slot);
     const formattedPolygonTotal = polygonTotal.toLocaleString("pt-BR");
-    const polygonLabel = polygonTotal === 1 ? "polÃ­gono" : "polÃ­gonos";
+    const polygonLabel = polygonTotal === 1 ? "polígono" : "polígonos";
     slot.polygonCount.textContent = `${formattedPolygonTotal} ${polygonLabel}`;
     slot.scene.add(gltf.scene);
     fitCamera(slot, gltf.scene);
@@ -405,7 +405,7 @@ async function loadModel(slot, model) {
     slot.version = null;
     slot.select.value = "";
     slot.currentLabel.textContent = "ERRO AO CARREGAR";
-    showToast(`NÃ£o foi possÃ­vel abrir ${model.name}. Confira se o arquivo GLB estÃ¡ Ã­ntegro.`);
+    showToast(`Não foi possível abrir ${model.name}. Confira se o arquivo GLB está íntegro.`);
     console.error(`Falha ao carregar ${model.name}:`, error);
   }
 }
@@ -422,7 +422,7 @@ function renderLibrary() {
     button.type = "button";
     button.className = "file-row";
     button.draggable = model.previewable;
-    button.setAttribute("aria-label", model.previewable ? `Selecionar ${model.name} para carregar` : `PrÃ©via indisponÃ­vel para ${model.name}`);
+    button.setAttribute("aria-label", model.previewable ? `Selecionar ${model.name} para carregar` : `Prévia indisponível para ${model.name}`);
     const glyph = document.createElement("span");
     glyph.className = "file-glyph";
     glyph.textContent = model.format;
@@ -433,10 +433,10 @@ function renderLibrary() {
     const subtitle = document.createElement("span");
     subtitle.className = "file-subtitle";
     subtitle.textContent = model.linked
-      ? "GITHUB Â· ATUALIZAÃ‡ÃƒO AUTOMÃTICA"
+      ? "GITHUB · ATUALIZAÇÃO AUTOMÁTICA"
       : model.previewable
         ? new Date(model.updated).toLocaleString("pt-BR")
-        : `ARQUIVO FONTE Â· ${new Date(model.updated).toLocaleDateString("pt-BR")}`;
+        : `ARQUIVO FONTE · ${new Date(model.updated).toLocaleDateString("pt-BR")}`;
     info.append(name, subtitle);
     const size = document.createElement("span");
     size.className = "file-size";
@@ -444,7 +444,7 @@ function renderLibrary() {
     button.append(glyph, info, size);
     button.addEventListener("click", () => model.previewable
       ? assignToEmptySlot(model)
-      : showToast("A prÃ©via deste arquivo ainda nÃ£o estÃ¡ disponÃ­vel."));
+      : showToast("A prévia deste arquivo ainda não está disponível."));
     if (model.previewable) {
       button.addEventListener("dragstart", (event) => {
         event.dataTransfer.setData("text/plain", model.name);
@@ -458,7 +458,7 @@ function renderLibrary() {
     deleteButton.className = "delete-file-button";
     deleteButton.title = "Excluir arquivo da biblioteca";
     deleteButton.setAttribute("aria-label", `Excluir ${model.name} da biblioteca`);
-    deleteButton.textContent = "Ã—";
+    deleteButton.textContent = "×";
     deleteButton.addEventListener("click", () => deleteModel(model));
     entry.append(button, deleteButton);
     modelList.append(entry);
@@ -468,7 +468,7 @@ function renderLibrary() {
     const selectedName = slot.pendingName ?? slot.modelName;
     slot.select.replaceChildren(new Option("Carregar modelo", ""));
     for (const model of models) {
-      slot.select.add(new Option(`${model.name} Â· ${model.format}`, model.name));
+      slot.select.add(new Option(`${model.name} · ${model.format}`, model.name));
     }
     if (models.some((model) => model.name === selectedName)) {
       slot.select.value = selectedName;
@@ -485,22 +485,22 @@ async function deleteModel(model) {
   try {
     const response = await fetch(`/api/models/${encodeURIComponent(model.name)}`, { method: "DELETE" });
     const result = await response.json();
-    if (!response.ok) throw new Error(result.detail ?? "NÃ£o foi possÃ­vel excluir o arquivo.");
+    if (!response.ok) throw new Error(result.detail ?? "Não foi possível excluir o arquivo.");
     await refreshModels();
     showToast(`${model.name} foi removido da biblioteca.`);
   } catch (error) {
-    showToast(error.message || "NÃ£o foi possÃ­vel excluir o arquivo.");
+    showToast(error.message || "Não foi possível excluir o arquivo.");
   }
 }
 
 function assignToEmptySlot(model) {
   if (!model.previewable) {
-    showToast("A prÃ©via deste arquivo ainda nÃ£o estÃ¡ disponÃ­vel.");
+    showToast("A prévia deste arquivo ainda não está disponível.");
     return;
   }
   const emptySlot = slots.find((slot) => !slot.modelName);
   if (!emptySlot) {
-    showToast("Os quatro espaÃ§os jÃ¡ estÃ£o ocupados. Escolha um painel para substituir o modelo.");
+    showToast("Os quatro espaços já estão ocupados. Escolha um painel para substituir o modelo.");
     return;
   }
   emptySlot.select.value = model.name;
@@ -550,15 +550,15 @@ async function uploadFile(file) {
   try {
     const response = await fetch("/api/models", { method: "POST", body: form });
     const result = await response.json();
-    if (!response.ok) throw new Error(result.detail ?? "NÃ£o foi possÃ­vel enviar o arquivo.");
+    if (!response.ok) throw new Error(result.detail ?? "Não foi possível enviar o arquivo.");
     await refreshModels();
     const uploadedModel = models.find((model) => model.name === result.name);
     if (uploadedModel?.previewable) assignToEmptySlot(uploadedModel);
     showToast(uploadedModel?.previewable
       ? "Modelo compartilhado com todos os participantes conectados."
-      : "Arquivo .blend compartilhado. Exporte tambÃ©m como .glb para visualizar.");
+      : "Arquivo .blend compartilhado. Exporte também como .glb para visualizar.");
   } catch (error) {
-    showToast(error.message || "NÃ£o foi possÃ­vel enviar o modelo.");
+    showToast(error.message || "Não foi possível enviar o modelo.");
   } finally {
     uploadInput.value = "";
   }
@@ -583,17 +583,17 @@ document.querySelector("#github-form").addEventListener("submit", async (event) 
       body: JSON.stringify({ url: urlInput.value }),
     });
     const result = await response.json();
-    if (!response.ok) throw new Error(result.detail ?? "NÃ£o foi possÃ­vel importar o arquivo.");
+    if (!response.ok) throw new Error(result.detail ?? "Não foi possível importar o arquivo.");
     await refreshModels();
     const importedModel = models.find((model) => model.name === result.name);
     if (importedModel?.previewable) assignToEmptySlot(importedModel);
     githubDialog.close();
     urlInput.value = "";
     showToast(importedModel?.previewable
-      ? "PrÃ©via carregada. O link serÃ¡ verificado automaticamente."
-      : "Arquivo importado, mas nÃ£o foi possÃ­vel gerar a prÃ©via 3D.");
+      ? "Prévia carregada. O link será verificado automaticamente."
+      : "Arquivo importado, mas não foi possível gerar a prévia 3D.");
   } catch (error) {
-    showToast(error.message || "NÃ£o foi possÃ­vel importar o arquivo do GitHub.");
+    showToast(error.message || "Não foi possível importar o arquivo do GitHub.");
   } finally {
     submitButton.disabled = false;
   }
