@@ -1,4 +1,7 @@
 from datetime import datetime, timezone
+import base64
+import hmac
+import secrets
 from pathlib import Path
 import asyncio
 import gzip
@@ -16,8 +19,8 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import quote, unquote, urlparse
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
-from fastapi import FastAPI, File, HTTPException, UploadFile, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse
+from fastapi import Depends, FastAPI, File, HTTPException, Request, UploadFile, WebSocket, WebSocketDisconnect
+from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 import zstandard
@@ -30,9 +33,29 @@ STATIC_DIR = ROOT / "static"
 DATA_DIR = STORAGE_DIR / "data"
 GITHUB_SOURCES_FILE = DATA_DIR / "github_sources.json"
 PREVIEWS_DIR = DATA_DIR / "previews"
+USERS_FILE = DATA_DIR / "users.json"
+PORTABLE_BLENDER_PATH = (
+    Path(os.environ["LOCALAPPDATA"]) / "modelagem-antunes" / "blender-5.2.2" / "blender.exe"
+    if os.environ.get("LOCALAPPDATA")
+    else None
+)
+AUTH_SECRET = os.environ.get("AUTH_SECRET", secrets.token_hex(32)).encode("utf-8")
+SESSION_MAX_AGE = 60 * 60 * 24 * 30
 MAX_UPLOAD_SIZE = 250 * 1024 * 1024
 SUPPORTED_EXTENSIONS = {".blend", ".blend1", ".glb"}
 GITHUB_POLL_SECONDS = 1
+AIRCRAFT_NAMES = (
+    "Saab 29 Tunnan",
+    "Dassault Mirage III",
+    "Dassault Mirage 5",
+    "Dassault Mirage 2000",
+    "ATR 42",
+    "Airbus A320",
+    "Boeing 737",
+    "Boeing 747",
+    "Boeing 777",
+    "Embraer E195",
+)
 
 MODELS_DIR.mkdir(exist_ok=True)
 DATA_DIR.mkdir(exist_ok=True)
@@ -41,17 +64,108 @@ mimetypes.add_type("model/gltf-binary", ".glb")
 
 app = FastAPI(title="Ateliê 3D A3")
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
-app.mount("/models", StaticFiles(directory=MODELS_DIR), name="models")
-app.mount("/previews", StaticFiles(directory=PREVIEWS_DIR), name="previews")
 connected_clients: set[WebSocket] = set()
 watcher_task: asyncio.Task | None = None
 sources_lock = threading.Lock()
 logger = logging.getLogger(__name__)
 
 
+class AuthCredentials(BaseModel):
+    name: str
+    password: str
+
+
+def read_users() -> dict[str, dict[str, str]]:
+    try:
+        data = json.loads(USERS_FILE.read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else {}
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
+def write_users(users: dict[str, dict[str, str]]) -> None:
+    DATA_DIR.mkdir(exist_ok=True)
+    temporary_path = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w", encoding="utf-8", dir=DATA_DIR, suffix=".tmp", delete=False
+        ) as temporary_file:
+            temporary_path = Path(temporary_file.name)
+            json.dump(users, temporary_file, ensure_ascii=False, indent=2)
+        os.replace(temporary_path, USERS_FILE)
+    finally:
+        if temporary_path and temporary_path.exists():
+            temporary_path.unlink()
+
+
+def hash_password(password: str, salt: str | None = None) -> str:
+    salt_bytes = base64.b64decode(salt) if salt else secrets.token_bytes(16)
+    digest = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt_bytes, 240_000)
+    return f"{base64.b64encode(salt_bytes).decode()}${base64.b64encode(digest).decode()}"
+
+
+def verify_password(password: str, encoded: str) -> bool:
+    try:
+        salt, digest = encoded.split("$", 1)
+        expected = base64.b64decode(digest)
+        actual = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), base64.b64decode(salt), 240_000)
+        return hmac.compare_digest(actual, expected)
+    except (ValueError, base64.binascii.Error):
+        return False
+
+
+def normalize_name(name: str) -> str:
+    return name.strip().casefold()
+
+
+def canonical_aircraft_name(name: str) -> str | None:
+    normalized_name = normalize_name(name)
+    return next(
+        (aircraft for aircraft in AIRCRAFT_NAMES if normalize_name(aircraft) == normalized_name),
+        None,
+    )
+
+
+def create_session(username: str) -> str:
+    nonce = secrets.token_urlsafe(24)
+    payload = f"{username}|{nonce}|{int(datetime.now(timezone.utc).timestamp())}"
+    signature = hmac.new(AUTH_SECRET, payload.encode(), hashlib.sha256).hexdigest()
+    return f"{base64.urlsafe_b64encode(payload.encode()).decode().rstrip('=')}.{signature}"
+
+
+def read_session(request: Request) -> str | None:
+    session = request.cookies.get("modelo_session")
+    if not session:
+        return None
+    try:
+        payload_b64, signature = session.rsplit(".", 1)
+        padding = "=" * (-len(payload_b64) % 4)
+        payload = base64.urlsafe_b64decode(payload_b64 + padding).decode()
+        expected = hmac.new(AUTH_SECRET, payload.encode(), hashlib.sha256).hexdigest()
+        if not hmac.compare_digest(signature, expected):
+            return None
+        username, _nonce, created_text = payload.rsplit("|", 2)
+        created = int(created_text)
+        if int(datetime.now(timezone.utc).timestamp()) - created > SESSION_MAX_AGE:
+            return None
+        username = normalize_name(username)
+        return username if username in read_users() else None
+    except (ValueError, UnicodeDecodeError, base64.binascii.Error):
+        return None
+
+
+def require_user(request: Request) -> str:
+    username = read_session(request)
+    if not username or username not in read_users():
+        raise HTTPException(status_code=401, detail="Faça login para continuar.")
+    return username
+
+
 def find_blender() -> Path | None:
     configured = os.environ.get("BLENDER_EXECUTABLE")
     candidates = [Path(configured)] if configured else []
+    if PORTABLE_BLENDER_PATH:
+        candidates.append(PORTABLE_BLENDER_PATH)
     on_path = shutil.which("blender")
     if on_path:
         candidates.append(Path(on_path))
@@ -78,6 +192,7 @@ def create_blend_preview(source: Path, preview_name: str | None = None) -> bool:
     PREVIEWS_DIR.mkdir(exist_ok=True)
     preview_name = preview_name or source.name
     preview_path = preview_path_for(preview_name)
+    temporary_source = DATA_DIR / f".{uuid.uuid4().hex}.blend"
     temporary_path = PREVIEWS_DIR / f".{uuid.uuid4().hex}.glb"
     export_script = (
         "import bpy, os, sys\n"
@@ -103,6 +218,8 @@ def create_blend_preview(source: Path, preview_name: str | None = None) -> bool:
     ]
 
     try:
+        shutil.copyfile(source, temporary_source)
+        command[command.index(str(source))] = str(temporary_source)
         result = subprocess.run(command, capture_output=True, text=True, timeout=180)
         if result.returncode != 0 or not temporary_path.is_file():
             details = (result.stderr + result.stdout)[-2000:]
@@ -130,6 +247,8 @@ def create_blend_preview(source: Path, preview_name: str | None = None) -> bool:
         logger.warning("Não foi possível criar a prévia de %s: %s", source.name, error)
         return False
     finally:
+        if temporary_source.exists():
+            temporary_source.unlink()
         if temporary_path.exists():
             temporary_path.unlink()
 
@@ -400,6 +519,28 @@ async def stop_model_watcher() -> None:
 
 @app.websocket("/ws")
 async def model_updates(websocket: WebSocket) -> None:
+    session = websocket.cookies.get("modelo_session")
+    if not session:
+        await websocket.close(code=1008)
+        return
+    try:
+        payload_b64, signature = session.rsplit(".", 1)
+        padding = "=" * (-len(payload_b64) % 4)
+        payload = base64.urlsafe_b64decode(payload_b64 + padding).decode()
+        expected = hmac.new(AUTH_SECRET, payload.encode(), hashlib.sha256).hexdigest()
+        if not hmac.compare_digest(signature, expected):
+            await websocket.close(code=1008)
+            return
+        username, _nonce, created_text = payload.rsplit("|", 2)
+        if int(datetime.now(timezone.utc).timestamp()) - int(created_text) > SESSION_MAX_AGE:
+            await websocket.close(code=1008)
+            return
+        if normalize_name(username) not in read_users():
+            await websocket.close(code=1008)
+            return
+    except (ValueError, UnicodeDecodeError, base64.binascii.Error):
+        await websocket.close(code=1008)
+        return
     await websocket.accept()
     connected_clients.add(websocket)
     await websocket.send_json({"type": "models_changed"})
@@ -411,12 +552,101 @@ async def model_updates(websocket: WebSocket) -> None:
 
 
 @app.get("/")
-def home() -> FileResponse:
-    return FileResponse(STATIC_DIR / "index.html")
+def home(request: Request) -> FileResponse:
+    headers = {"Cache-Control": "no-store"}
+    if not read_session(request):
+        return FileResponse(STATIC_DIR / "login.html", headers=headers)
+    return FileResponse(STATIC_DIR / "index.html", headers=headers)
+
+
+@app.post("/api/auth/register")
+def register(payload: AuthCredentials) -> dict[str, str]:
+    name = canonical_aircraft_name(payload.name)
+    if not name:
+        raise HTTPException(status_code=400, detail="Escolha um modelo de avião da lista.")
+    username = normalize_name(name)
+    if len(payload.password) < 8:
+        raise HTTPException(status_code=400, detail="A senha deve ter pelo menos 8 caracteres.")
+    users = read_users()
+    if any(normalize_name(user.get("name", key)) == username for key, user in users.items()):
+        raise HTTPException(status_code=409, detail="Já existe uma conta com este nome.")
+    if len(users) >= len(AIRCRAFT_NAMES):
+        raise HTTPException(status_code=409, detail="O limite de 10 contas foi atingido.")
+    users[username] = {"name": name, "password": hash_password(payload.password)}
+    write_users(users)
+    return {"name": name}
+
+
+@app.get("/api/auth/aircraft")
+def list_aircraft_names() -> list[str]:
+    return list(AIRCRAFT_NAMES)
+
+
+@app.post("/api/auth/login")
+def login(payload: AuthCredentials, response: Response) -> dict[str, str]:
+    username = normalize_name(payload.name)
+    users = read_users()
+    account_id = next(
+        (key for key, account in users.items() if normalize_name(account.get("name", key)) == username),
+        None,
+    )
+    user = users.get(account_id) if account_id else None
+    if not user or not verify_password(payload.password, user["password"]):
+        raise HTTPException(status_code=401, detail="Nome ou senha inválidos.")
+    response.set_cookie(
+        "modelo_session",
+        create_session(account_id),
+        httponly=True,
+        samesite="lax",
+        max_age=SESSION_MAX_AGE,
+        secure=os.environ.get("MODEL_HTTPS_ONLY", "").lower() in {"1", "true", "yes"},
+    )
+    return {"name": user["name"]}
+
+
+@app.post("/api/auth/logout")
+def logout(response: Response) -> dict[str, bool]:
+    response.delete_cookie(
+        "modelo_session",
+        path="/",
+        httponly=True,
+        samesite="lax",
+        secure=os.environ.get("MODEL_HTTPS_ONLY", "").lower() in {"1", "true", "yes"},
+    )
+    return {"ok": True}
+
+
+@app.get("/api/health")
+def health() -> dict[str, bool]:
+    return {"ok": True}
+
+
+@app.get("/api/auth/me")
+def auth_me(username: str = Depends(require_user)) -> dict[str, str]:
+    user = read_users()[username]
+    return {"name": user["name"]}
+
+
+@app.get("/models/{filename}")
+def get_model(filename: str, username: str = Depends(require_user)) -> FileResponse:
+    safe_filename = Path(filename).name
+    path = MODELS_DIR / safe_filename
+    if safe_filename != filename or not path.is_file():
+        raise HTTPException(status_code=404, detail="Arquivo não encontrado.")
+    return FileResponse(path)
+
+
+@app.get("/previews/{filename}")
+def get_preview(filename: str, username: str = Depends(require_user)) -> FileResponse:
+    safe_filename = Path(filename).name
+    path = PREVIEWS_DIR / safe_filename
+    if safe_filename != filename or not path.is_file():
+        raise HTTPException(status_code=404, detail="Prévia não encontrada.")
+    return FileResponse(path)
 
 
 @app.get("/api/models")
-def list_models() -> list[dict[str, str | int | bool | None]]:
+def list_models(username: str = Depends(require_user)) -> list[dict[str, str | int | bool | None]]:
     models = []
     with sources_lock:
         linked_names = set(read_github_sources())
@@ -459,7 +689,10 @@ def list_models() -> list[dict[str, str | int | bool | None]]:
 
 
 @app.post("/api/models")
-async def upload_model(file: UploadFile = File(...)) -> dict[str, str | bool]:
+async def upload_model(
+    username: str = Depends(require_user),
+    file: UploadFile = File(...),
+) -> dict[str, str | bool]:
     filename = Path(file.filename or "").name
     extension = Path(filename).suffix.lower()
     if not filename or extension not in SUPPORTED_EXTENSIONS:
@@ -502,7 +735,10 @@ async def upload_model(file: UploadFile = File(...)) -> dict[str, str | bool]:
 
 
 @app.post("/api/github")
-async def add_github_model(payload: GitHubImport) -> dict[str, str | bool]:
+async def add_github_model(
+    payload: GitHubImport,
+    username: str = Depends(require_user),
+) -> dict[str, str | bool]:
     filename = await asyncio.to_thread(import_github_file, payload.url)
     extension = Path(filename).suffix.lower()
     model_format = "BLEND" if extension.startswith(".blend") else "GLB"
@@ -511,7 +747,10 @@ async def add_github_model(payload: GitHubImport) -> dict[str, str | bool]:
 
 
 @app.delete("/api/models/{filename}")
-def delete_model(filename: str) -> dict[str, str]:
+def delete_model(
+    filename: str,
+    username: str = Depends(require_user),
+) -> dict[str, str]:
     safe_filename = Path(filename).name
     if safe_filename != filename or Path(filename).suffix.lower() not in SUPPORTED_EXTENSIONS:
         raise HTTPException(status_code=400, detail="Nome ou formato de arquivo inválido.")
