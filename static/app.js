@@ -11,8 +11,57 @@ let models = [];
 let refreshInFlight = false;
 let toastTimer;
 
+async function loadAccount() {
+  try {
+    const response = await fetch("/api/auth/me", { cache: "no-store" });
+    if (response.status === 401) {
+      window.location.replace("/");
+      return;
+    }
+    const user = await response.json();
+    const accountButton = document.querySelector("#account-button");
+    accountButton.textContent = `${user.name} Â· Sair`;
+  } catch (error) {
+    console.error("Falha ao consultar a conta:", error);
+  }
+}
+
+const accountButton = document.querySelector("#account-button");
+accountButton.addEventListener("click", async () => {
+  accountButton.disabled = true;
+  try {
+    const response = await fetch("/api/auth/logout", { method: "POST" });
+    if (!response.ok) throw new Error(`O servidor respondeu ${response.status}.`);
+    window.location.replace("/");
+  } catch (error) {
+    accountButton.disabled = false;
+    showToast("NÃ£o foi possÃ­vel sair da conta. Tente novamente.");
+    console.error("Falha ao encerrar a sessÃ£o:", error);
+  }
+});
+
 function createSlot(element, index) {
   const canvasHost = element.querySelector(".viewport-canvas");
+  const tools = document.createElement("div");
+  tools.className = "viewport-tools";
+  const textureToggle = document.createElement("button");
+  textureToggle.className = "model-tool-button texture-toggle";
+  textureToggle.type = "button";
+  textureToggle.textContent = "Textura ligada";
+  textureToggle.setAttribute("aria-label", "Desativar texturas");
+  textureToggle.setAttribute("aria-pressed", "true");
+  textureToggle.disabled = true;
+  const wireframeToggle = document.createElement("button");
+  wireframeToggle.className = "model-tool-button wireframe-toggle";
+  wireframeToggle.type = "button";
+  wireframeToggle.textContent = "Malha desligada";
+  wireframeToggle.setAttribute("aria-label", "Mostrar malha");
+  wireframeToggle.setAttribute("aria-pressed", "false");
+  wireframeToggle.disabled = true;
+  const polygonCount = document.createElement("span");
+  polygonCount.className = "polygon-count";
+  polygonCount.textContent = "0 polÃ­gonos";
+  tools.append(textureToggle, wireframeToggle, polygonCount);
   const camera = new THREE.PerspectiveCamera(38, 1, 0.01, 1000);
   const scene = new THREE.Scene();
   const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
@@ -22,7 +71,7 @@ function createSlot(element, index) {
   renderer.toneMappingExposure = 1.1;
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-  canvasHost.append(renderer.domElement);
+  canvasHost.append(renderer.domElement, tools);
 
   scene.add(new THREE.HemisphereLight(0xffffff, 0x777777, 1.7));
   const keyLight = new THREE.DirectionalLight(0xffffff, 3);
@@ -67,12 +116,20 @@ function createSlot(element, index) {
     select: element.querySelector(".model-select"),
     loadButton: element.querySelector(".load-button"),
     fullscreenButton: element.querySelector(".fullscreen-button"),
+    textureToggle,
+    wireframeToggle,
+    polygonCount,
     currentLabel: element.querySelector(".current-model"),
     loading: element.querySelector(".viewport-loading"),
     modelName: null,
     pendingName: null,
     version: null,
     requestId: 0,
+    textureBindings: [],
+    textureVisible: true,
+    modelMeshes: [],
+    wireframeObjects: [],
+    wireframeVisible: false,
   };
 
   slot.select.addEventListener("change", () => {
@@ -86,7 +143,7 @@ function createSlot(element, index) {
     } else if (model.previewable) {
       loadModel(slot, model);
     } else {
-      showToast("A prévia deste arquivo ainda não está disponível.");
+      showToast("A prÃ©via deste arquivo ainda nÃ£o estÃ¡ disponÃ­vel.");
     }
   });
   slot.fullscreenButton.addEventListener("click", async () => {
@@ -94,9 +151,15 @@ function createSlot(element, index) {
       if (document.fullscreenElement === element) await document.exitFullscreen();
       else await element.requestFullscreen();
     } catch (error) {
-      showToast("Não foi possível abrir este painel em tela cheia.");
+      showToast("NÃ£o foi possÃ­vel abrir este painel em tela cheia.");
       console.error("Falha ao alternar tela cheia:", error);
     }
+  });
+  textureToggle.addEventListener("click", () => {
+    setTextureVisibility(slot, !slot.textureVisible);
+  });
+  wireframeToggle.addEventListener("click", () => {
+    setWireframeVisibility(slot, !slot.wireframeVisible);
   });
   element.querySelector(".reset-button").addEventListener("click", () => {
     const model = models.find((item) => item.name === slot.modelName);
@@ -158,7 +221,7 @@ function showToast(message) {
 
 function disposeObject(object) {
   object.traverse((child) => {
-    if (!child.isMesh) return;
+    if (!child.isMesh && !child.isLineSegments) return;
     child.geometry?.dispose();
     const materials = Array.isArray(child.material) ? child.material : [child.material];
     for (const material of materials) {
@@ -170,12 +233,75 @@ function disposeObject(object) {
   });
 }
 
+function updateTextureToggle(slot) {
+  slot.textureToggle.textContent = slot.textureVisible ? "Textura ligada" : "Textura desligada";
+  slot.textureToggle.setAttribute("aria-pressed", String(slot.textureVisible));
+  slot.textureToggle.setAttribute(
+    "aria-label",
+    slot.textureVisible ? "Desativar texturas" : "Ativar texturas",
+  );
+}
+
+function setTextureVisibility(slot, visible) {
+  for (const { material, textures } of slot.textureBindings) {
+    for (const [property, texture] of textures) {
+      material[property] = visible ? texture : null;
+    }
+    material.needsUpdate = true;
+  }
+  slot.textureVisible = visible;
+  updateTextureToggle(slot);
+}
+
+function setWireframeVisibility(slot, visible) {
+  if (visible && !slot.wireframeObjects.length) {
+    for (const mesh of slot.modelMeshes) {
+      const wireframe = new THREE.LineSegments(
+        new THREE.WireframeGeometry(mesh.geometry),
+        new THREE.LineBasicMaterial({
+          color: 0xc5ed62,
+          transparent: true,
+          opacity: 0.85,
+          depthWrite: false,
+        }),
+      );
+      wireframe.name = "model-wireframe";
+      wireframe.renderOrder = 2;
+      mesh.add(wireframe);
+      slot.wireframeObjects.push(wireframe);
+    }
+  }
+  for (const wireframe of slot.wireframeObjects) wireframe.visible = visible;
+  slot.wireframeVisible = visible;
+  slot.wireframeToggle.textContent = visible ? "Malha ligada" : "Malha desligada";
+  slot.wireframeToggle.setAttribute("aria-pressed", String(visible));
+  slot.wireframeToggle.setAttribute(
+    "aria-label",
+    visible ? "Ocultar malha" : "Mostrar malha",
+  );
+}
+
+function resetModelTools(slot) {
+  slot.textureBindings = [];
+  slot.textureVisible = true;
+  slot.modelMeshes = [];
+  slot.wireframeObjects = [];
+  slot.wireframeVisible = false;
+  slot.textureToggle.disabled = true;
+  slot.wireframeToggle.disabled = true;
+  slot.polygonCount.textContent = "0 polÃ­gonos";
+  updateTextureToggle(slot);
+  setWireframeVisibility(slot, false);
+}
+
 function removeSlotModel(slot) {
   const previous = slot.scene.getObjectByName("active-model");
   if (previous) {
+    setTextureVisibility(slot, true);
     slot.scene.remove(previous);
     disposeObject(previous);
   }
+  resetModelTools(slot);
   slot.element.classList.remove("has-model");
 }
 
@@ -237,12 +363,36 @@ async function loadModel(slot, model) {
     }
     removeSlotModel(slot);
     gltf.scene.name = "active-model";
+    const textureBindings = new Map();
+    let polygonTotal = 0;
     gltf.scene.traverse((child) => {
       if (child.isMesh) {
         child.castShadow = true;
         child.receiveShadow = true;
+        slot.modelMeshes.push(child);
+        const geometry = child.geometry;
+        const position = geometry.getAttribute("position");
+        const elementCount = geometry.index?.count ?? position?.count ?? 0;
+        const drawCount = Number.isFinite(geometry.drawRange.count)
+          ? Math.min(elementCount, geometry.drawRange.count)
+          : elementCount;
+        polygonTotal += Math.floor(drawCount / 3) * (child.isInstancedMesh ? child.count : 1);
+        const materials = Array.isArray(child.material) ? child.material : [child.material];
+        for (const material of materials) {
+          if (!material || textureBindings.has(material)) continue;
+          const textures = Object.entries(material).filter(([, value]) => value?.isTexture);
+          if (textures.length) textureBindings.set(material, textures);
+        }
       }
     });
+    slot.textureBindings = [...textureBindings].map(([material, textures]) => ({ material, textures }));
+    slot.textureVisible = true;
+    slot.textureToggle.disabled = slot.textureBindings.length === 0;
+    slot.wireframeToggle.disabled = slot.modelMeshes.length === 0;
+    updateTextureToggle(slot);
+    const formattedPolygonTotal = polygonTotal.toLocaleString("pt-BR");
+    const polygonLabel = polygonTotal === 1 ? "polÃ­gono" : "polÃ­gonos";
+    slot.polygonCount.textContent = `${formattedPolygonTotal} ${polygonLabel}`;
     slot.scene.add(gltf.scene);
     fitCamera(slot, gltf.scene);
     slot.element.classList.add("has-model");
@@ -255,7 +405,7 @@ async function loadModel(slot, model) {
     slot.version = null;
     slot.select.value = "";
     slot.currentLabel.textContent = "ERRO AO CARREGAR";
-    showToast(`Não foi possível abrir ${model.name}. Confira se o arquivo GLB está íntegro.`);
+    showToast(`NÃ£o foi possÃ­vel abrir ${model.name}. Confira se o arquivo GLB estÃ¡ Ã­ntegro.`);
     console.error(`Falha ao carregar ${model.name}:`, error);
   }
 }
@@ -272,7 +422,7 @@ function renderLibrary() {
     button.type = "button";
     button.className = "file-row";
     button.draggable = model.previewable;
-    button.setAttribute("aria-label", model.previewable ? `Selecionar ${model.name} para carregar` : `Prévia indisponível para ${model.name}`);
+    button.setAttribute("aria-label", model.previewable ? `Selecionar ${model.name} para carregar` : `PrÃ©via indisponÃ­vel para ${model.name}`);
     const glyph = document.createElement("span");
     glyph.className = "file-glyph";
     glyph.textContent = model.format;
@@ -283,10 +433,10 @@ function renderLibrary() {
     const subtitle = document.createElement("span");
     subtitle.className = "file-subtitle";
     subtitle.textContent = model.linked
-      ? "GITHUB · ATUALIZAÇÃO AUTOMÁTICA"
+      ? "GITHUB Â· ATUALIZAÃ‡ÃƒO AUTOMÃTICA"
       : model.previewable
         ? new Date(model.updated).toLocaleString("pt-BR")
-        : `ARQUIVO FONTE · ${new Date(model.updated).toLocaleDateString("pt-BR")}`;
+        : `ARQUIVO FONTE Â· ${new Date(model.updated).toLocaleDateString("pt-BR")}`;
     info.append(name, subtitle);
     const size = document.createElement("span");
     size.className = "file-size";
@@ -294,7 +444,7 @@ function renderLibrary() {
     button.append(glyph, info, size);
     button.addEventListener("click", () => model.previewable
       ? assignToEmptySlot(model)
-      : showToast("A prévia deste arquivo ainda não está disponível."));
+      : showToast("A prÃ©via deste arquivo ainda nÃ£o estÃ¡ disponÃ­vel."));
     if (model.previewable) {
       button.addEventListener("dragstart", (event) => {
         event.dataTransfer.setData("text/plain", model.name);
@@ -308,7 +458,7 @@ function renderLibrary() {
     deleteButton.className = "delete-file-button";
     deleteButton.title = "Excluir arquivo da biblioteca";
     deleteButton.setAttribute("aria-label", `Excluir ${model.name} da biblioteca`);
-    deleteButton.textContent = "×";
+    deleteButton.textContent = "Ã—";
     deleteButton.addEventListener("click", () => deleteModel(model));
     entry.append(button, deleteButton);
     modelList.append(entry);
@@ -318,7 +468,7 @@ function renderLibrary() {
     const selectedName = slot.pendingName ?? slot.modelName;
     slot.select.replaceChildren(new Option("Carregar modelo", ""));
     for (const model of models) {
-      slot.select.add(new Option(`${model.name} · ${model.format}`, model.name));
+      slot.select.add(new Option(`${model.name} Â· ${model.format}`, model.name));
     }
     if (models.some((model) => model.name === selectedName)) {
       slot.select.value = selectedName;
@@ -335,22 +485,22 @@ async function deleteModel(model) {
   try {
     const response = await fetch(`/api/models/${encodeURIComponent(model.name)}`, { method: "DELETE" });
     const result = await response.json();
-    if (!response.ok) throw new Error(result.detail ?? "Não foi possível excluir o arquivo.");
+    if (!response.ok) throw new Error(result.detail ?? "NÃ£o foi possÃ­vel excluir o arquivo.");
     await refreshModels();
     showToast(`${model.name} foi removido da biblioteca.`);
   } catch (error) {
-    showToast(error.message || "Não foi possível excluir o arquivo.");
+    showToast(error.message || "NÃ£o foi possÃ­vel excluir o arquivo.");
   }
 }
 
 function assignToEmptySlot(model) {
   if (!model.previewable) {
-    showToast("A prévia deste arquivo ainda não está disponível.");
+    showToast("A prÃ©via deste arquivo ainda nÃ£o estÃ¡ disponÃ­vel.");
     return;
   }
   const emptySlot = slots.find((slot) => !slot.modelName);
   if (!emptySlot) {
-    showToast("Os quatro espaços já estão ocupados. Escolha um painel para substituir o modelo.");
+    showToast("Os quatro espaÃ§os jÃ¡ estÃ£o ocupados. Escolha um painel para substituir o modelo.");
     return;
   }
   emptySlot.select.value = model.name;
@@ -400,15 +550,15 @@ async function uploadFile(file) {
   try {
     const response = await fetch("/api/models", { method: "POST", body: form });
     const result = await response.json();
-    if (!response.ok) throw new Error(result.detail ?? "Não foi possível enviar o arquivo.");
+    if (!response.ok) throw new Error(result.detail ?? "NÃ£o foi possÃ­vel enviar o arquivo.");
     await refreshModels();
     const uploadedModel = models.find((model) => model.name === result.name);
     if (uploadedModel?.previewable) assignToEmptySlot(uploadedModel);
     showToast(uploadedModel?.previewable
       ? "Modelo compartilhado com todos os participantes conectados."
-      : "Arquivo .blend compartilhado. Exporte também como .glb para visualizar.");
+      : "Arquivo .blend compartilhado. Exporte tambÃ©m como .glb para visualizar.");
   } catch (error) {
-    showToast(error.message || "Não foi possível enviar o modelo.");
+    showToast(error.message || "NÃ£o foi possÃ­vel enviar o modelo.");
   } finally {
     uploadInput.value = "";
   }
@@ -433,17 +583,17 @@ document.querySelector("#github-form").addEventListener("submit", async (event) 
       body: JSON.stringify({ url: urlInput.value }),
     });
     const result = await response.json();
-    if (!response.ok) throw new Error(result.detail ?? "Não foi possível importar o arquivo.");
+    if (!response.ok) throw new Error(result.detail ?? "NÃ£o foi possÃ­vel importar o arquivo.");
     await refreshModels();
     const importedModel = models.find((model) => model.name === result.name);
     if (importedModel?.previewable) assignToEmptySlot(importedModel);
     githubDialog.close();
     urlInput.value = "";
     showToast(importedModel?.previewable
-      ? "Prévia carregada. O link será verificado automaticamente."
-      : "Arquivo importado, mas não foi possível gerar a prévia 3D.");
+      ? "PrÃ©via carregada. O link serÃ¡ verificado automaticamente."
+      : "Arquivo importado, mas nÃ£o foi possÃ­vel gerar a prÃ©via 3D.");
   } catch (error) {
-    showToast(error.message || "Não foi possível importar o arquivo do GitHub.");
+    showToast(error.message || "NÃ£o foi possÃ­vel importar o arquivo do GitHub.");
   } finally {
     submitButton.disabled = false;
   }
@@ -512,6 +662,7 @@ function animate() {
 }
 
 animate();
+loadAccount();
 refreshModels();
 connectUpdates();
 setInterval(refreshModels, 5000);
