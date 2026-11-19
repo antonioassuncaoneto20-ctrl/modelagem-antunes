@@ -8,7 +8,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
-    <link rel="stylesheet" href="/static/styles.css?v=lighting-1" />
+    <link rel="stylesheet" href="/static/styles.css?v=model-tools-1" />
     <script type="importmap">
       {
         "imports": {
@@ -17,7 +17,7 @@
         }
       }
     </script>
-    <script type="module" src="/static/app.js?v=lighting-1"></script>
+    <script type="module" src="/static/app.js?v=model-tools-2"></script>
   </head>
   <body>
     <header class="topbar">
@@ -28,6 +28,7 @@
       <div class="project-name"><span class="project-chip">A3</span> ESPAÇO DE MODELOS</div>
       <div class="top-actions">
         <div class="connection" id="connection"><span class="connection-dot"></span><span id="connection-label">CONECTANDO</span></div>
+        <button class="account-button" id="account-button" type="button" title="Sair"></button>
         <button class="github-button" id="github-open" type="button"><span aria-hidden="true">↗</span> GitHub</button>
         <label class="upload-button" for="model-upload"><span aria-hidden="true">＋</span> Enviar arquivo</label>
         <input id="model-upload" type="file" accept=".blend,.blend1,.glb,model/gltf-binary" hidden />

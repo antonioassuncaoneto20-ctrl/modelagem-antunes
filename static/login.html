@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>MODELO. — Entrar</title>
+    <link rel="stylesheet" href="/static/styles.css?v=auth-4" />
+  </head>
+  <body class="auth-page">
+    <main class="auth-card">
+      <a class="wordmark" href="/" aria-label="Modelo">
+        <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span>
+        <span>MODELO<span class="brand-period">.</span></span>
+      </a>
+      <p class="eyebrow">ESPAÇO DE MODELOS A3</p>
+      <h1 id="auth-title">Entrar na biblioteca</h1>
+      <form id="auth-form">
+        <label id="login-name-label">Nome
+          <input id="auth-name" name="name" autocomplete="username" list="recent-users" required />
+          <datalist id="recent-users"></datalist>
+        </label>
+        <label id="aircraft-label" hidden>Modelo do avião
+          <select id="auth-aircraft" name="aircraft" disabled></select>
+        </label>
+        <label>Senha
+          <input id="auth-password" name="password" type="password" autocomplete="current-password" minlength="8" required />
+        </label>
+        <p class="auth-hint" id="auth-hint" hidden>Para criar uma conta, selecione um modelo de avião da lista.</p>
+        <p class="auth-notice" id="auth-notice" role="status" hidden></p>
+        <p class="auth-error" id="auth-error" role="alert"></p>
+        <button class="auth-submit" type="submit">Entrar</button>
+      </form>
+      <button class="auth-switch" id="auth-switch" type="button">Criar uma conta</button>
+    </main>
+    <script>
+      let registering = false;
+      const form = document.querySelector("#auth-form");
+      const title = document.querySelector("#auth-title");
+      const submit = form.querySelector(".auth-submit");
+      const switchButton = document.querySelector("#auth-switch");
+      const nameInput = document.querySelector("#auth-name");
+      const loginNameLabel = document.querySelector("#login-name-label");
+      const aircraftLabel = document.querySelector("#aircraft-label");
+      const aircraftSelect = document.querySelector("#auth-aircraft");
+      const password = document.querySelector("#auth-password");
+      const error = document.querySelector("#auth-error");
+      const hint = document.querySelector("#auth-hint");
+      const notice = document.querySelector("#auth-notice");
+      const recentUsers = document.querySelector("#recent-users");
+
+      function getRecentNames() {
+        try {
+          const names = JSON.parse(localStorage.getItem("modelo_recent_users") || "[]");
+          return Array.isArray(names) ? names.filter((name) => typeof name === "string").slice(0, 5) : [];
+        } catch (caught) {
+          console.error("Não foi possível ler os nomes recentes:", caught);
+          return [];
+        }
+      }
+
+      function saveRecentName(name) {
+        try {
+          const names = [name, ...getRecentNames().filter((recent) => recent.toLocaleLowerCase() !== name.toLocaleLowerCase())].slice(0, 5);
+          localStorage.setItem("modelo_recent_users", JSON.stringify(names));
+          recentUsers.replaceChildren(...names.map((recent) => new Option(recent, recent)));
+        } catch (caught) {
+          console.error("Não foi possível salvar o nome recente neste navegador:", caught);
+        }
+      }
+
+      const recentNames = getRecentNames();
+      recentUsers.replaceChildren(...recentNames.map((name) => new Option(name, name)));
+      if (recentNames.length) nameInput.value = recentNames[0];
+
+      fetch("/api/auth/aircraft")
+        .then((response) => {
+          if (!response.ok) throw new Error("Não foi possível carregar a lista de aviões.");
+          return response.json();
+        })
+        .then((names) => {
+          aircraftSelect.replaceChildren(new Option("Selecione um avião", ""));
+          for (const name of names) aircraftSelect.add(new Option(name, name));
+        })
+        .catch((caught) => {
+          error.textContent = caught.message;
+        });
+
+      function setMode(isRegistering) {
+        registering = isRegistering;
+        title.textContent = registering ? "Criar conta" : "Entrar na biblioteca";
+        submit.textContent = registering ? "Cadastrar" : "Entrar";
+        switchButton.textContent = registering ? "Já tenho uma conta" : "Criar uma conta";
+        loginNameLabel.hidden = registering;
+        nameInput.required = !registering;
+        nameInput.disabled = registering;
+        aircraftLabel.hidden = !registering;
+        aircraftSelect.disabled = !registering;
+        aircraftSelect.required = registering;
+        hint.hidden = !registering;
+        nameInput.autocomplete = "username";
+        password.autocomplete = registering ? "new-password" : "current-password";
+        error.textContent = "";
+        notice.hidden = true;
+      }
+
+      switchButton.addEventListener("click", () => setMode(!registering));
+
+      form.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        submit.disabled = true;
+        error.textContent = "";
+        try {
+          const response = await fetch(registering ? "/api/auth/register" : "/api/auth/login", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              name: registering ? aircraftSelect.value : nameInput.value,
+              password: password.value,
+            }),
+          });
+          const result = await response.json();
+          if (!response.ok) throw new Error(result.detail || "Não foi possível continuar.");
+          saveRecentName(result.name);
+          if (registering) {
+            nameInput.value = result.name;
+            password.value = "";
+            setMode(false);
+            notice.textContent = "Cadastro concluído. Entre usando o nome escolhido e sua senha.";
+            notice.hidden = false;
+            password.focus();
+          } else {
+            window.location.replace("/");
+          }
+        } catch (caught) {
+          error.textContent = caught.message;
+        } finally {
+          submit.disabled = false;
+        }
+      });
+    </script>
+  </body>
+</html>
