@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>MODELO. — Entrar</title>
-    <link rel="stylesheet" href="/static/styles.css?v=auth-4" />
+    <link rel="stylesheet" href="/static/styles.css?v=auth-5" />
   </head>
   <body class="auth-page">
     <main class="auth-card">
@@ -22,6 +22,14 @@
         <label id="aircraft-label" hidden>Modelo do avião
           <select id="auth-aircraft" name="aircraft" disabled></select>
         </label>
+        <label class="auth-check" id="airplane-label" hidden>
+          <input id="airplane-checkbox" type="checkbox" />
+          <span>VOCÊ É UMA AVIÃO?</span>
+        </label>
+        <section class="airplane-reveal" id="airplane-reveal" hidden aria-label="Imagem de avião">
+          <img src="/static/aviao-do-filme-avioes-1024x576.jpg" alt="Aviões voando no céu" />
+          <button id="airplane-back" type="button">Voltar ao cadastro</button>
+        </section>
         <label>Senha
           <input id="auth-password" name="password" type="password" autocomplete="current-password" minlength="8" required />
         </label>
@@ -42,6 +50,10 @@
       const loginNameLabel = document.querySelector("#login-name-label");
       const aircraftLabel = document.querySelector("#aircraft-label");
       const aircraftSelect = document.querySelector("#auth-aircraft");
+      const airplaneLabel = document.querySelector("#airplane-label");
+      const airplaneCheckbox = document.querySelector("#airplane-checkbox");
+      const airplaneReveal = document.querySelector("#airplane-reveal");
+      const airplaneBack = document.querySelector("#airplane-back");
       const password = document.querySelector("#auth-password");
       const error = document.querySelector("#auth-error");
       const hint = document.querySelector("#auth-hint");
@@ -96,6 +108,11 @@
         aircraftLabel.hidden = !registering;
         aircraftSelect.disabled = !registering;
         aircraftSelect.required = registering;
+        airplaneLabel.hidden = !registering;
+        airplaneCheckbox.checked = false;
+        airplaneReveal.hidden = true;
+        form.classList.remove("airplane-view");
+        switchButton.hidden = false;
         hint.hidden = !registering;
         nameInput.autocomplete = "username";
         password.autocomplete = registering ? "new-password" : "current-password";
@@ -104,6 +121,19 @@
       }
 
       switchButton.addEventListener("click", () => setMode(!registering));
+      airplaneCheckbox.addEventListener("change", () => {
+        if (!airplaneCheckbox.checked) return;
+        airplaneReveal.hidden = false;
+        form.classList.add("airplane-view");
+        switchButton.hidden = true;
+      });
+      airplaneBack.addEventListener("click", () => {
+        airplaneCheckbox.checked = false;
+        airplaneReveal.hidden = true;
+        form.classList.remove("airplane-view");
+        switchButton.hidden = false;
+        airplaneCheckbox.focus();
+      });
 
       form.addEventListener("submit", async (event) => {
         event.preventDefault();

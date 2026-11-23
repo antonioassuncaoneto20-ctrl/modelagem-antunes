@@ -481,7 +481,7 @@ function renderLibrary() {
 }
 
 async function deleteModel(model) {
-  if (!window.confirm(`Excluir "${model.name}" da biblioteca compartilhada?`)) return;
+  if (!window.confirm(`Excluir "${model.name}" da sua biblioteca?`)) return;
   try {
     const response = await fetch(`/api/models/${encodeURIComponent(model.name)}`, { method: "DELETE" });
     const result = await response.json();
@@ -546,7 +546,7 @@ async function uploadFile(file) {
   }
   const form = new FormData();
   form.append("file", file);
-  showToast("Enviando modelo para a biblioteca compartilhada...");
+  showToast("Enviando modelo para sua biblioteca...");
   try {
     const response = await fetch("/api/models", { method: "POST", body: form });
     const result = await response.json();
@@ -555,8 +555,8 @@ async function uploadFile(file) {
     const uploadedModel = models.find((model) => model.name === result.name);
     if (uploadedModel?.previewable) assignToEmptySlot(uploadedModel);
     showToast(uploadedModel?.previewable
-      ? "Modelo compartilhado com todos os participantes conectados."
-      : "Arquivo .blend compartilhado. Exporte também como .glb para visualizar.");
+      ? "Modelo salvo na sua biblioteca."
+      : "Arquivo .blend salvo. Exporte também como .glb para visualizar.");
   } catch (error) {
     showToast(error.message || "Não foi possível enviar o modelo.");
   } finally {

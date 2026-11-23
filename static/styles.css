@@ -147,6 +147,14 @@ button:focus-visible, select:focus-visible, label:focus-visible { outline: 2px s
 .auth-card form { display: grid; gap: 14px; }
 .auth-card label { display: grid; gap: 7px; color: #53584d; font-size: 10px; font-weight: 700; }
 .auth-card input, .auth-card select { width: 100%; height: 42px; border: 1px solid #d2d7c9; border-radius: 3px; padding: 0 10px; color: var(--ink); background: #fff; }
+.auth-card .auth-check:not([hidden]) { display: flex; align-items: center; gap: 9px; }
+.auth-card .auth-check input { width: 17px; height: 17px; margin: 0; accent-color: #779a34; }
+.auth-card .auth-check span { color: #30392c; font-size: 11px; font-weight: 800; }
+.auth-card form.airplane-view > :not(.airplane-reveal) { display: none; }
+.airplane-reveal { display: grid; gap: 12px; }
+.airplane-reveal img { display: block; width: 100%; aspect-ratio: 16 / 9; border-radius: 2px; object-fit: cover; }
+.airplane-reveal button { min-height: 40px; border: 1px solid #d2d7c9; border-radius: 3px; color: #40483a; background: transparent; font-size: 10px; font-weight: 700; cursor: pointer; }
+.airplane-reveal button:hover { background: #e8ebe1; }
 .auth-submit { height: 42px; border: 0; border-radius: 3px; color: #f7f8f1; background: #20241f; font-size: 11px; font-weight: 700; cursor: pointer; }
 .auth-submit:disabled { opacity: .6; }
 .auth-switch { width: 100%; margin-top: 12px; border: 0; color: #687849; background: transparent; font-size: 10px; cursor: pointer; }
