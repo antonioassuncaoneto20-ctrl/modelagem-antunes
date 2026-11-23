@@ -5,7 +5,7 @@ services:
     plan: free
     dockerfilePath: ./Dockerfile
     dockerContext: .
-    healthCheckPath: /api/models
+    healthCheckPath: /api/health
     envVars:
       - key: MODEL_STORAGE_DIR
         value: /var/data
